@@ -39,9 +39,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ scores });
   } catch (error: any) {
     console.error("Evaluate error:", error);
-    const isQuota = error?.status === 429 || error?.code === "insufficient_quota";
+    const msg = error?.message || error?.toString() || "";
+    const isQuota = error?.status === 429 || error?.code === "insufficient_quota" || msg.includes("quota") || msg.includes("429");
     return NextResponse.json(
-      { error: isQuota ? "API quota exceeded. Check your OpenAI billing." : "Failed to evaluate" },
+      { error: isQuota ? "API quota exceeded. Check your Gemini billing at https://aistudio.google.com." : "Failed to evaluate" },
       { status: isQuota ? 503 : 500 }
     );
   }

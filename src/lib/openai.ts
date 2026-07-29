@@ -15,7 +15,7 @@ export async function runPrompt(
 ): Promise<{ output: string; latency_ms: number; token_usage: number }> {
   const start = Date.now();
   const model = getClient().getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-2.0-flash",
     generationConfig: { maxOutputTokens: 500, temperature },
   });
 
@@ -53,7 +53,7 @@ export async function evaluateOutputs(
   const userPrompt = `Task: "${taskDescription}"\nReference: "${reference}"\n${candidatesBlock}`;
 
   const model = getClient().getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-2.0-flash",
     systemInstruction: EVALUATOR_SYSTEM_PROMPT,
     generationConfig: { maxOutputTokens: 1000, temperature: 0 },
   });

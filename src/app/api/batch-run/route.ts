@@ -29,9 +29,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ results });
   } catch (error: any) {
     console.error("Batch run error:", error);
-    const isQuota = error?.status === 429 || error?.code === "insufficient_quota";
+    const msg = error?.message || error?.toString() || "";
+    const isQuota = error?.status === 429 || error?.code === "insufficient_quota" || msg.includes("quota") || msg.includes("429");
     return NextResponse.json(
-      { error: isQuota ? "API quota exceeded. Check your OpenAI billing." : "Failed to run batch" },
+      { error: isQuota ? "API quota exceeded. Check your Gemini billing at https://aistudio.google.com." : "Failed to run batch" },
       { status: isQuota ? 503 : 500 }
     );
   }
