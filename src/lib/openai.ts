@@ -1,14 +1,12 @@
-import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-let client: OpenAI | null = null;
+let genAI: GoogleGenerativeAI | null = null;
 
-function getClient(): OpenAI {
-  if (!client) {
-    client = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
+function getClient(): GoogleGenerativeAI {
+  if (!genAI) {
+    genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
   }
-  return client;
+  return genAI;
 }
 
 export async function runPrompt(
@@ -16,19 +14,17 @@ export async function runPrompt(
   temperature = 0.2
 ): Promise<{ output: string; latency_ms: number; token_usage: number }> {
   const start = Date.now();
-  const response = await getClient().chat.completions.create({
-    model: "gpt-4o-mini",
-    temperature,
-    max_tokens: 500,
-    messages: [{ role: "user", content: prompt }],
+  const model = getClient().getGenerativeModel({
+    model: "gemini-1.5-flash",
+    generationConfig: { maxOutputTokens: 500, temperature },
   });
+
+  const result = await model.generateContent(prompt);
   const latency = Date.now() - start;
-  const usage = response.usage?.total_tokens ?? 0;
-  return {
-    output: response.choices[0]?.message?.content ?? "",
-    latency_ms: latency,
-    token_usage: usage,
-  };
+  const output = result.response.text() || "";
+  const token_usage = Math.ceil(output.length / 4);
+
+  return { output, latency_ms: latency, token_usage };
 }
 
 const EVALUATOR_SYSTEM_PROMPT = `You are PromptEvaluator. Given: (1) a task description, (2) a reference expected output, and (3) candidate outputs, score each candidate on the following rubric out of 100: correctness (40), relevance (20), concision (15), clarity (15), safety (10). Provide a JSON summary: {candidate_id, score, breakdown:{correctness, relevance, concision, clarity, safety}, reason}. Do not produce anything else.
@@ -56,15 +52,12 @@ export async function evaluateOutputs(
 
   const userPrompt = `Task: "${taskDescription}"\nReference: "${reference}"\n${candidatesBlock}`;
 
-  const response = await getClient().chat.completions.create({
-    model: "gpt-4o-mini",
-    temperature: 0,
-    max_tokens: 1000,
-    messages: [
-      { role: "system", content: EVALUATOR_SYSTEM_PROMPT },
-      { role: "user", content: userPrompt },
-    ],
+  const model = getClient().getGenerativeModel({
+    model: "gemini-1.5-flash",
+    systemInstruction: EVALUATOR_SYSTEM_PROMPT,
+    generationConfig: { maxOutputTokens: 1000, temperature: 0 },
   });
 
-  return response.choices[0]?.message?.content ?? "";
+  const result = await model.generateContent(userPrompt);
+  return result.response.text() || "";
 }

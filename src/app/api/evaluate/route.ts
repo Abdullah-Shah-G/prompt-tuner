@@ -37,8 +37,12 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({ scores });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Evaluate error:", error);
-    return NextResponse.json({ error: "Failed to evaluate" }, { status: 500 });
+    const isQuota = error?.status === 429 || error?.code === "insufficient_quota";
+    return NextResponse.json(
+      { error: isQuota ? "API quota exceeded. Check your OpenAI billing." : "Failed to evaluate" },
+      { status: isQuota ? 503 : 500 }
+    );
   }
 }

@@ -15,8 +15,12 @@ export async function POST(request: Request) {
     const { output, latency_ms, token_usage } = await runPrompt(prompt, temperature);
 
     return NextResponse.json({ output, latency_ms, token_usage });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Run error:", error);
-    return NextResponse.json({ error: "Failed to run prompt" }, { status: 500 });
+    const isQuota = error?.status === 429 || error?.code === "insufficient_quota";
+    return NextResponse.json(
+      { error: isQuota ? "API quota exceeded. Check your OpenAI billing." : "Failed to run prompt" },
+      { status: isQuota ? 503 : 500 }
+    );
   }
 }

@@ -27,8 +27,12 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ results });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Batch run error:", error);
-    return NextResponse.json({ error: "Failed to run batch" }, { status: 500 });
+    const isQuota = error?.status === 429 || error?.code === "insufficient_quota";
+    return NextResponse.json(
+      { error: isQuota ? "API quota exceeded. Check your OpenAI billing." : "Failed to run batch" },
+      { status: isQuota ? 503 : 500 }
+    );
   }
 }
