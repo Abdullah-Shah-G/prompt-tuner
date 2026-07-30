@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prompt Tuner</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <div class="max-w-6xl mx-auto p-4">
+    <header class="mb-6">
+      <h1 class="text-2xl font-bold text-gray-900">Prompt Tuner</h1>
+      <p class="text-gray-500 text-sm">Write, test, and tune prompts with automated scoring</p>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="space-y-4">
+        <section class="bg-white rounded-lg p-4 shadow">
+          <h2 class="font-semibold text-gray-800 mb-2">Prompt Template</h2>
+          <textarea id="prompt-input" class="w-full border rounded-lg p-3 text-sm font-mono h-32 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Write your prompt template with {{ variable }} placeholders..."></textarea>
+          <div id="variables" class="text-xs text-gray-400 mt-1"></div>
+        </section>
+
+        <section class="bg-white rounded-lg p-4 shadow">
+          <h2 class="font-semibold text-gray-800 mb-2">Test Cases</h2>
+          <div id="test-cases"></div>
+          <button id="add-case" class="mt-2 text-sm text-blue-600 hover:underline">+ Add test case</button>
+        </section>
+
+        <div class="flex gap-2">
+          <button id="btn-run" class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50">Run Tests</button>
+          <button id="btn-eval-all" class="bg-purple-600 text-white px-4 py-2 rounded text-sm hover:bg-purple-700 disabled:opacity-50">Evaluate All</button>
+        </div>
+
+        <section id="batch-score" class="hidden bg-blue-50 rounded-lg p-3 text-sm"></section>
+
+        <section class="bg-white rounded-lg p-4 shadow">
+          <h2 class="font-semibold text-gray-800 mb-2">Results</h2>
+          <div id="results" class="space-y-2 text-sm"></div>
+        </section>
+      </div>
+
+      <div class="space-y-4">
+        <section class="bg-white rounded-lg p-4 shadow">
+          <h2 class="font-semibold text-gray-800 mb-2">Evaluation</h2>
+          <textarea id="ref-input" class="w-full border rounded-lg p-2 text-sm h-20 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Reference output (expected)..."></textarea>
+          <div class="flex gap-2 mt-2">
+            <button id="btn-eval" class="bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700 disabled:opacity-50">Evaluate Selected</button>
+          </div>
+          <div id="eval-result" class="mt-2 text-sm"></div>
+        </section>
+
+        <section class="bg-white rounded-lg p-4 shadow">
+          <h2 class="font-semibold text-gray-800 mb-2">Comparison</h2>
+          <div id="comparison" class="space-y-2 text-sm"></div>
+        </section>
+
+        <section class="bg-white rounded-lg p-4 shadow">
+          <div class="flex justify-between items-center mb-2">
+            <h2 class="font-semibold text-gray-800">Leaderboard</h2>
+            <div class="flex gap-2">
+              <button id="btn-save" class="bg-amber-600 text-white px-3 py-1.5 rounded text-sm hover:bg-amber-700 disabled:opacity-50">Save Version</button>
+              <button id="btn-clear" class="text-red-500 text-xs hover:underline">Clear</button>
+            </div>
+          </div>
+          <div id="leaderboard" class="space-y-1 text-sm"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let testCases = [];
+    let results = [];
+    let scores = {};
+    let versions = [];
+    let selectedId = null;
+
+    const promptInput = document.getElementById("prompt-input");
+    const varsEl = document.getElementById("variables");
+    const testCasesEl = document.getElementById("test-cases");
+    const resultsEl = document.getElementById("results");
+    const refInput = document.getElementById("ref-input");
+    const evalResultEl = document.getElementById("eval-result");
+    const comparisonEl = document.getElementById("comparison");
+    const leaderboardEl = document.getElementById("leaderboard");
+    const batchScoreEl = document.getElementById("batch-score");
+
+    function getVariables() {
+      const text = promptInput.value;
+      const matches = text.match(/\{\{(\w+)\}\}/g) || [];
+      return [...new Set(matches.map(v => v.slice(2, -2)))];
+    }
+
+    function renderVariables() {
+      const vars = getVariables();
+      varsEl.textContent = vars.length ? "Variables: " + vars.join(", ") : "No variables found";
+      renderTestCases();
+    }
+
+    function renderTestCases() {
+      const vars = getVariables();
+      if (testCases.length === 0) {
+        testCases = [{ id: "1", label: "Case 1", inputs: {} }];
+        vars.forEach(v => testCases[0].inputs[v] = "");
+      }
+      let html = "";
+      testCases.forEach((tc, i) => {
+        html += `<div class="border rounded p-2 mb-2 text-sm">`;
+        html += `<div class="flex gap-2 items-center mb-1"><input class="border rounded px-2 py-1 text-xs flex-1" value="${tc.label}" onchange="testCases[${i}].label=this.value" placeholder="Label"/><button class="text-red-500 text-xs" onclick="removeCase(${i})">Remove</button></div>`;
+        vars.forEach(v => {
+          const val = tc.inputs[v] || "";
+          html += `<input class="border rounded px-2 py-1 text-xs w-full mt-1" value="${val}" onchange="testCases[${i}].inputs['${v}']=this.value" placeholder="${v}"/>`;
+        });
+        html += `</div>`;
+      });
+      testCasesEl.innerHTML = html;
+    }
+
+    function removeCase(i) {
+      testCases.splice(i, 1);
+      renderTestCases();
+    }
+
+    document.getElementById("add-case").addEventListener("click", () => {
+      const vars = getVariables();
+      const tc = { id: String(Date.now()), label: `Case ${testCases.length + 1}`, inputs: {} };
+      vars.forEach(v => tc.inputs[v] = "");
+      testCases.push(tc);
+      renderTestCases();
+    });
+
+    promptInput.addEventListener("input", renderVariables);
+    renderVariables();
+
+    async function runTests() {
+      const prompt = promptInput.value.trim();
+      if (!prompt || testCases.length === 0) return;
+      document.getElementById("btn-run").disabled = true;
+      results = [];
+      scores = {};
+      selectedId = null;
+      batchScoreEl.classList.add("hidden");
+
+      try {
+        const res = await fetch("/api/batch-run", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt_template: prompt, test_cases: testCases, temperature: 0.2 }),
+        });
+        const data = await res.json();
+        results = data.results || [];
+      } catch (e) { console.error(e); }
+      document.getElementById("btn-run").disabled = false;
+      renderResults();
+    }
+
+    function renderResults() {
+      let html = "";
+      results.forEach(r => {
+        const score = scores[r.test_case_id];
+        const scoreBadge = score ? `<span class="ml-2 text-xs ${score.score >= 70 ? 'text-green-600' : score.score >= 40 ? 'text-yellow-600' : 'text-red-600'}">${score.score}/100</span>` : "";
+        const selected = r.test_case_id === selectedId ? "ring-2 ring-blue-400" : "";
+        html += `<div class="border rounded p-2 cursor-pointer hover:bg-gray-50 ${selected}" onclick="selectResult('${r.test_case_id}')">
+          <div class="font-medium text-xs text-gray-500">${r.label}${scoreBadge}</div>
+          <div class="text-gray-700 mt-1 text-xs whitespace-pre-wrap line-clamp-3">${r.output.slice(0, 300)}</div>
+          <div class="text-xs text-gray-400 mt-1">${r.latency_ms}ms · ${r.token_usage}tokens</div>
+        </div>`;
+      });
+      resultsEl.innerHTML = html || '<p class="text-gray-400 text-xs">Run tests to see results</p>';
+    }
+
+    function selectResult(id) {
+      selectedId = id;
+      renderResults();
+      renderEval();
+      renderComparison();
+    }
+
+    async function evalSelected() {
+      const output = results.find(r => r.test_case_id === selectedId)?.output;
+      if (!selectedId || !output || !refInput.value.trim()) return;
+      document.getElementById("btn-eval").disabled = true;
+      try {
+        const res = await fetch("/api/evaluate", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ task_description: promptInput.value.slice(0, 200), reference: refInput.value.trim(), candidates: [{ id: selectedId, output }] }),
+        });
+        const data = await res.json();
+        if (data.scores?.length) {
+          scores[selectedId] = data.scores[0];
+          renderResults();
+          renderEval();
+          renderComparison();
+        }
+      } catch (e) { console.error(e); }
+      document.getElementById("btn-eval").disabled = false;
+    }
+
+    async function evalAll() {
+      if (!results.length || !refInput.value.trim()) return;
+      document.getElementById("btn-eval-all").disabled = true;
+      try {
+        const res = await fetch("/api/evaluate", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ task_description: promptInput.value.slice(0, 200), reference: refInput.value.trim(), candidates: results.map(r => ({ id: r.test_case_id, output: r.output })) }),
+        });
+        const data = await res.json();
+        if (data.scores) {
+          let total = 0;
+          data.scores.forEach(s => { scores[s.candidate_id] = s; total += s.score; });
+          const avg = total / data.scores.length;
+          batchScoreEl.classList.remove("hidden");
+          batchScoreEl.innerHTML = `Avg score: <strong>${avg.toFixed(1)}</strong> / 100 across ${data.scores.length} outputs`;
+          renderResults();
+          renderEval();
+          renderComparison();
+        }
+      } catch (e) { console.error(e); }
+      document.getElementById("btn-eval-all").disabled = false;
+    }
+
+    function renderEval() {
+      const result = results.find(r => r.test_case_id === selectedId);
+      const score = selectedId ? scores[selectedId] : null;
+      if (!result) { evalResultEl.innerHTML = '<p class="text-gray-400 text-xs">Select a result to evaluate</p>'; return; }
+      let html = `<div class="bg-gray-50 rounded p-2 mb-2"><strong>Output:</strong><div class="whitespace-pre-wrap mt-1">${result.output}</div></div>`;
+      if (score) {
+        html += `<div class="bg-blue-50 rounded p-2"><strong>Score: ${score.score}/100</strong>`;
+        if (score.breakdown) {
+          html += `<div class="grid grid-cols-5 gap-1 mt-1 text-xs">`;
+          for (const [k, v] of Object.entries(score.breakdown)) {
+            html += `<div>${k}: ${v}</div>`;
+          }
+          html += `</div>`;
+        }
+        if (score.reason) html += `<div class="text-xs mt-1 text-gray-500">${score.reason}</div>`;
+        html += `</div>`;
+      }
+      evalResultEl.innerHTML = html;
+    }
+
+    function renderComparison() {
+      if (!results.length) { comparisonEl.innerHTML = '<p class="text-gray-400 text-xs">No results to compare</p>'; return; }
+      let html = "";
+      results.forEach(r => {
+        const s = scores[r.test_case_id];
+        const pct = s ? `<span class="text-xs font-mono">${s.score}</span>` : '<span class="text-xs text-gray-400">-</span>';
+        html += `<div class="flex items-center gap-2 ${r.test_case_id === selectedId ? 'bg-blue-50' : ''} border-b py-1">
+          <span class="text-xs text-gray-500 w-20 truncate">${r.label}</span>
+          <span class="text-xs text-gray-700 flex-1 truncate">${r.output.slice(0, 80)}</span>
+          <span>${pct}</span>
+        </div>`;
+      });
+      comparisonEl.innerHTML = html;
+    }
+
+    function renderLeaderboard() {
+      if (!versions.length) { leaderboardEl.innerHTML = '<p class="text-gray-400 text-xs">No saved versions yet</p>'; return; }
+      let html = "";
+      versions.forEach((v, i) => {
+        html += `<div class="flex items-center justify-between border-b py-1">
+          <div><span class="text-xs font-mono">#${i + 1}</span><span class="text-xs text-gray-500 ml-2">${v.avg.toFixed(1)} avg</span></div>
+          <div class="flex gap-2">
+            <button class="text-blue-500 text-xs" onclick="restoreVersion(${i})">Restore</button>
+            <button class="text-red-500 text-xs" onclick="deleteVersion(${i})">Delete</button>
+          </div>
+        </div>`;
+      });
+      leaderboardEl.innerHTML = html;
+    }
+
+    function saveVersion() {
+      const allScores = Object.values(scores);
+      const avg = allScores.length ? allScores.reduce((a, s) => a + s.score, 0) / allScores.length : 0;
+      versions.push({ prompt: promptInput.value, avg, scores: [...allScores], results: [...results] });
+      versions.sort((a, b) => b.avg - a.avg);
+      renderLeaderboard();
+    }
+
+    function restoreVersion(i) {
+      promptInput.value = versions[i].prompt;
+      renderVariables();
+    }
+
+    function deleteVersion(i) {
+      versions.splice(i, 1);
+      renderLeaderboard();
+    }
+
+    document.getElementById("btn-run").addEventListener("click", runTests);
+    document.getElementById("btn-eval").addEventListener("click", evalSelected);
+    document.getElementById("btn-eval-all").addEventListener("click", evalAll);
+    document.getElementById("btn-save").addEventListener("click", saveVersion);
+    document.getElementById("btn-clear").addEventListener("click", () => { versions = []; renderLeaderboard(); });
+  </script>
+</body>
+</html>
