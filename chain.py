@@ -2,17 +2,15 @@ import os
 import re
 import json
 import time
+from functools import cache
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 load_dotenv()
 
-llm = ChatGoogleGenerativeAI(
-    model="gemini-3.1-flash-lite",
-    api_key=os.getenv("GEMINI_API_KEY"),
-    max_output_tokens=500,
-    temperature=0.2,
-)
+@cache
+def get_llm():
+    return ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite", api_key=os.getenv("GEMINI_API_KEY"), max_output_tokens=500, temperature=0.2)
 
 EVALUATOR_SYSTEM_PROMPT = """You are PromptEvaluator. Given: (1) a task description, (2) a reference expected output, and (3) candidate outputs, score each candidate on the following rubric out of 100: correctness (40), relevance (20), concision (15), clarity (15), safety (10). Provide a JSON summary: {candidate_id, score, breakdown:{correctness, relevance, concision, clarity, safety}, reason}. Do not produce anything else.
 
@@ -30,14 +28,15 @@ Output: {"candidate_id":"1","score":95,"breakdown":{"correctness":38,"relevance"
 
 
 async def run_prompt(prompt: str, temperature: float = 0.2) -> dict:
-    start = time.time()
-    result = await llm.ainvoke([{"role": "user", "content": prompt}])
+    start = time.perf_counter()
+    result = await get_llm().bind(temperature=temperature).ainvoke([{"role": "user", "content": prompt}])
     content = result.content
     if isinstance(content, list):
         content = "".join(c.get("text", "") for c in content)
-    latency = int((time.time() - start) * 1000)
+    latency = int((time.perf_counter() - start) * 1000)
     output = content.strip() or ""
-    return {"output": output, "latency_ms": latency, "token_usage": max(1, len(output) // 4)}
+    usage = result.usage_metadata or {}
+    return {"output": output, "latency_ms": latency, "token_usage": usage.get("total_tokens", max(1, len(output) // 4)), "token_usage_estimated": "total_tokens" not in usage}
 
 
 async def evaluate_outputs(
@@ -70,6 +69,8 @@ async def evaluate_outputs(
 
 
 def heuristic_score(reference: str, output: str) -> dict:
+    if not output.strip():
+        return {"total": 0, "breakdown": dict.fromkeys(("correctness", "relevance", "concision", "clarity", "safety"), 0)}
     ref_words = set(reference.lower().split())
     out_words = set(output.lower().split())
     overlap = len(ref_words & out_words)

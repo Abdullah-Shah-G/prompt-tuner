@@ -86,10 +86,14 @@
     const leaderboardEl = document.getElementById("leaderboard");
     const batchScoreEl = document.getElementById("batch-score");
 
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+    }
+
     function getVariables() {
       const text = promptInput.value;
-      const matches = text.match(/\{\{(\w+)\}\}/g) || [];
-      return [...new Set(matches.map(v => v.slice(2, -2)))];
+      const matches = text.match(/\{\{\s*(\w+)\s*\}\}/g) || [];
+      return [...new Set(matches.map(v => v.slice(2, -2).trim()))];
     }
 
     function renderVariables() {
@@ -107,10 +111,10 @@
       let html = "";
       testCases.forEach((tc, i) => {
         html += `<div class="border rounded p-2 mb-2 text-sm">`;
-        html += `<div class="flex gap-2 items-center mb-1"><input class="border rounded px-2 py-1 text-xs flex-1" value="${tc.label}" onchange="testCases[${i}].label=this.value" placeholder="Label"/><button class="text-red-500 text-xs" onclick="removeCase(${i})">Remove</button></div>`;
+        html += `<div class="flex gap-2 items-center mb-1"><input class="border rounded px-2 py-1 text-xs flex-1" value="${escapeHtml(tc.label)}" onchange="testCases[${i}].label=this.value" placeholder="Label"/><button class="text-red-500 text-xs" onclick="removeCase(${i})">Remove</button></div>`;
         vars.forEach(v => {
           const val = tc.inputs[v] || "";
-          html += `<input class="border rounded px-2 py-1 text-xs w-full mt-1" value="${val}" onchange="testCases[${i}].inputs['${v}']=this.value" placeholder="${v}"/>`;
+          html += `<input class="border rounded px-2 py-1 text-xs w-full mt-1" value="${escapeHtml(val)}" onchange="testCases[${i}].inputs['${escapeHtml(v)}']=this.value" placeholder="${escapeHtml(v)}"/>`;
         });
         html += `</div>`;
       });
@@ -147,9 +151,10 @@
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt_template: prompt, test_cases: testCases, temperature: 0.2 }),
         });
+        if (!res.ok) throw new Error("Request failed");
         const data = await res.json();
         results = data.results || [];
-      } catch (e) { console.error(e); }
+      } catch (e) { alert("Request failed. Check the service configuration and try again."); }
       document.getElementById("btn-run").disabled = false;
       renderResults();
     }
@@ -161,9 +166,9 @@
         const scoreBadge = score ? `<span class="ml-2 text-xs ${score.score >= 70 ? 'text-green-600' : score.score >= 40 ? 'text-yellow-600' : 'text-red-600'}">${score.score}/100</span>` : "";
         const selected = r.test_case_id === selectedId ? "ring-2 ring-blue-400" : "";
         html += `<div class="border rounded p-2 cursor-pointer hover:bg-gray-50 ${selected}" onclick="selectResult('${r.test_case_id}')">
-          <div class="font-medium text-xs text-gray-500">${r.label}${scoreBadge}</div>
-          <div class="text-gray-700 mt-1 text-xs whitespace-pre-wrap line-clamp-3">${r.output.slice(0, 300)}</div>
-          <div class="text-xs text-gray-400 mt-1">${r.latency_ms}ms · ${r.token_usage}tokens</div>
+          <div class="font-medium text-xs text-gray-500">${escapeHtml(r.label)}${scoreBadge}</div>
+          <div class="text-gray-700 mt-1 text-xs whitespace-pre-wrap line-clamp-3">${escapeHtml(r.output.slice(0, 300))}</div>
+          <div class="text-xs text-gray-400 mt-1">${r.latency_ms}ms · ${r.token_usage_estimated ? "~" : ""}${r.token_usage} tokens</div>
         </div>`;
       });
       resultsEl.innerHTML = html || '<p class="text-gray-400 text-xs">Run tests to see results</p>';
@@ -185,6 +190,7 @@
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ task_description: promptInput.value.slice(0, 200), reference: refInput.value.trim(), candidates: [{ id: selectedId, output }] }),
         });
+        if (!res.ok) throw new Error("Request failed");
         const data = await res.json();
         if (data.scores?.length) {
           scores[selectedId] = data.scores[0];
@@ -192,7 +198,7 @@
           renderEval();
           renderComparison();
         }
-      } catch (e) { console.error(e); }
+      } catch (e) { alert("Request failed. Check the service configuration and try again."); }
       document.getElementById("btn-eval").disabled = false;
     }
 
@@ -204,6 +210,7 @@
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ task_description: promptInput.value.slice(0, 200), reference: refInput.value.trim(), candidates: results.map(r => ({ id: r.test_case_id, output: r.output })) }),
         });
+        if (!res.ok) throw new Error("Request failed");
         const data = await res.json();
         if (data.scores) {
           let total = 0;
@@ -215,7 +222,7 @@
           renderEval();
           renderComparison();
         }
-      } catch (e) { console.error(e); }
+      } catch (e) { alert("Request failed. Check the service configuration and try again."); }
       document.getElementById("btn-eval-all").disabled = false;
     }
 
@@ -223,17 +230,17 @@
       const result = results.find(r => r.test_case_id === selectedId);
       const score = selectedId ? scores[selectedId] : null;
       if (!result) { evalResultEl.innerHTML = '<p class="text-gray-400 text-xs">Select a result to evaluate</p>'; return; }
-      let html = `<div class="bg-gray-50 rounded p-2 mb-2"><strong>Output:</strong><div class="whitespace-pre-wrap mt-1">${result.output}</div></div>`;
+      let html = `<div class="bg-gray-50 rounded p-2 mb-2"><strong>Output:</strong><div class="whitespace-pre-wrap mt-1">${escapeHtml(result.output)}</div></div>`;
       if (score) {
         html += `<div class="bg-blue-50 rounded p-2"><strong>Score: ${score.score}/100</strong>`;
         if (score.breakdown) {
           html += `<div class="grid grid-cols-5 gap-1 mt-1 text-xs">`;
           for (const [k, v] of Object.entries(score.breakdown)) {
-            html += `<div>${k}: ${v}</div>`;
+            html += `<div>${escapeHtml(k)}: ${escapeHtml(v)}</div>`;
           }
           html += `</div>`;
         }
-        if (score.reason) html += `<div class="text-xs mt-1 text-gray-500">${score.reason}</div>`;
+        if (score.reason) html += `<div class="text-xs mt-1 text-gray-500">${escapeHtml(score.reason)}</div>`;
         html += `</div>`;
       }
       evalResultEl.innerHTML = html;
@@ -246,8 +253,8 @@
         const s = scores[r.test_case_id];
         const pct = s ? `<span class="text-xs font-mono">${s.score}</span>` : '<span class="text-xs text-gray-400">-</span>';
         html += `<div class="flex items-center gap-2 ${r.test_case_id === selectedId ? 'bg-blue-50' : ''} border-b py-1">
-          <span class="text-xs text-gray-500 w-20 truncate">${r.label}</span>
-          <span class="text-xs text-gray-700 flex-1 truncate">${r.output.slice(0, 80)}</span>
+          <span class="text-xs text-gray-500 w-20 truncate">${escapeHtml(r.label)}</span>
+          <span class="text-xs text-gray-700 flex-1 truncate">${escapeHtml(r.output.slice(0, 80))}</span>
           <span>${pct}</span>
         </div>`;
       });
@@ -272,14 +279,24 @@
     function saveVersion() {
       const allScores = Object.values(scores);
       const avg = allScores.length ? allScores.reduce((a, s) => a + s.score, 0) / allScores.length : 0;
-      versions.push({ prompt: promptInput.value, avg, scores: [...allScores], results: [...results] });
+      versions.push(structuredClone({ prompt: promptInput.value, reference: refInput.value, testCases, avg, scores: allScores, results }));
       versions.sort((a, b) => b.avg - a.avg);
       renderLeaderboard();
     }
 
     function restoreVersion(i) {
-      promptInput.value = versions[i].prompt;
+      const saved = structuredClone(versions[i]);
+      promptInput.value = saved.prompt;
+      refInput.value = saved.reference;
+      testCases = saved.testCases;
+      results = saved.results;
+      scores = Object.fromEntries(saved.scores.map(s => [s.candidate_id, s]));
+      selectedId = null;
+      batchScoreEl.classList.add("hidden");
       renderVariables();
+      renderResults();
+      renderEval();
+      renderComparison();
     }
 
     function deleteVersion(i) {
